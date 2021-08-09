@@ -9,6 +9,9 @@ more details on pdb++ features.
 
 from __future__ import print_function
 
+import asyncio
+import uuid
+import textwrap
 import sys
 import os.path
 import inspect
@@ -74,6 +77,8 @@ side_effects_free = re.compile(r'^ *[_0-9a-zA-Z\[\].]* *$')
 
 RE_COLOR_ESCAPES = re.compile("(\x1b[^m]+m)+")
 RE_REMOVE_FANCYCOMPLETER_ESCAPE_SEQS = re.compile(r"\x1b\[[\d;]+m")
+
+asyncable = re.compile(r'([^\w_]await)|([^\w_]async\s+for\s+)|(^await)|(^async\s+for)')
 
 if sys.version_info < (3, ):
     from io import BytesIO as StringIO
@@ -949,6 +954,25 @@ class Pdb(pdb.Pdb, ConfigurableClass, object):
         # with the name exists in the current context;
         # This prevents pdb to quit if you type e.g. 'r[0]' by mystake.
         cmd, arg, newline = super(Pdb, self).parseline(line)
+
+        if cmd == 'await':
+            cmd = 'p'
+            arg = 'await ' + arg
+
+        if asyncable.search(arg):
+            async def _run_async_code():
+                ns1, ns2, ns3 = self.curframe.f_globals.copy(), self.curframe.f_locals.copy(), {}
+                exec(textwrap.dedent(f"""
+                    async def _{(func_ident := uuid.uuid4().hex)}():
+                        return {arg}
+                """), ns1 | ns2, ns3)
+                return await ns3['_' + func_ident]()
+
+            key, arg2 = '_' + uuid.uuid4().hex, '_' + uuid.uuid4().hex
+            self.curframe.f_globals.update({key: _run_async_code})
+            value = self._getval(f'asyncio.get_event_loop().run_until_complete({key}())')
+            self.curframe.f_globals.update({arg2: value})
+            arg = arg2
 
         if cmd:
             # prefixed strings.
