@@ -71,6 +71,13 @@ except ImportError:
 
         return dec
 
+try:
+    import nest_asyncio
+    nest_asyncio.apply()
+except ImportError:
+    nest_asyncio = None
+    print('Async support disabled')
+
 # If it contains only _, digits, letters, [] or dots, it's probably side
 # effects free.
 side_effects_free = re.compile(r'^ *[_0-9a-zA-Z\[\].]* *$')
@@ -955,11 +962,11 @@ class Pdb(pdb.Pdb, ConfigurableClass, object):
         # This prevents pdb to quit if you type e.g. 'r[0]' by mystake.
         cmd, arg, newline = super(Pdb, self).parseline(line)
 
-        if cmd == 'await':
+        if nest_asyncio and cmd == 'await':
             cmd = 'p'
             arg = 'await ' + arg
 
-        if asyncable.search(arg):
+        if nest_asyncio and asyncable.search(arg):
             async def _run_async_code():
                 ns1, ns2, ns3 = self.curframe.f_globals.copy(), self.curframe.f_locals.copy(), {}
                 exec(textwrap.dedent(f"""
@@ -969,8 +976,12 @@ class Pdb(pdb.Pdb, ConfigurableClass, object):
                 return await ns3['_' + func_ident]()
 
             key, arg2 = '_' + uuid.uuid4().hex, '_' + uuid.uuid4().hex
-            self.curframe.f_globals.update({key: _run_async_code})
-            value = self._getval(f'asyncio.get_event_loop().run_until_complete({key}())')
+            self.curframe.f_globals.update({key: _run_async_code, 'asyncio': asyncio})
+            try:
+                value = self._getval(f'asyncio.get_event_loop().run_until_complete({key}())')
+            except Exception as e:
+                print(e)
+                return 'pass', '', ''
             self.curframe.f_globals.update({arg2: value})
             arg = arg2
 
