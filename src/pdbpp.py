@@ -972,7 +972,7 @@ class Pdb(pdb.Pdb, ConfigurableClass, object):
                 exec(textwrap.dedent(f"""
                     async def _{(func_ident := uuid.uuid4().hex)}():
                         return {arg}
-                """), ns1 | ns2, ns3)
+                """), {**ns1, **ns2}, ns3)
                 return await ns3['_' + func_ident]()
 
             key, arg2 = '_' + uuid.uuid4().hex, '_' + uuid.uuid4().hex
